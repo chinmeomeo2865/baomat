@@ -24,11 +24,15 @@ Vì chỉ đọc log nên **áp dụng được cho mọi web** (PHP, Node, Java
 
 | File | Chức năng |
 |---|---|
-| `parser.py` | Đọc file log → tách thành IP, thời gian, URL, mã trạng thái... |
+| `server.py` | **(Chính) Server giám sát REALTIME**: nhận request thật → phân loại ngay → dashboard tự cập nhật |
+| `attack_demo.py` | Bắn request thử (tốt + xấu + DoS + DDoS) để demo trực tiếp |
 | `detect.py` | Các luật phát hiện tấn công (chỉnh ngưỡng ở đây) |
-| `monitor.py` | Chạy trên terminal: in cảnh báo (để chụp màn hình) |
-| `dashboard.py` | Trang web: thống kê, nhật ký request, bộ lọc, tài liệu kỹ thuật |
-| `make_sample_log.py` | Tạo log mẫu để demo (không tấn công web thật) |
+| `parser.py` | Đọc file log → tách thành IP, thời gian, URL, mã trạng thái... |
+| `monitor.py` | Chạy trên terminal: đọc file log rồi in cảnh báo |
+| `dashboard.py` | Dashboard đọc file log có sẵn (phân tích log cũ) |
+| `make_sample_log.py` | Tạo file log mẫu để demo kiểu đọc log |
+
+> Có **2 cách dùng**: (1) **Realtime** với `server.py` — server nhận request trực tiếp, phân loại và hiện ngay (demo sinh động nhất). (2) **Đọc log** với `dashboard.py` — phân tích file log đã có sẵn.
 
 ## Tính năng của dashboard
 
@@ -38,21 +42,33 @@ Vì chỉ đọc log nên **áp dụng được cho mọi web** (PHP, Node, Java
 - **Click vào 1 request** để xem chi tiết đầy đủ + lý do bị đánh dấu.
 - Tab **Tài liệu kỹ thuật**: ý nghĩa các mã HTTP + cách phân biệt từng loại tấn công.
 
-## Cách chạy
+## Cách chạy — CÁCH 1: Realtime (khuyên dùng để demo)
 
 ```bash
 # 1. Cài thư viện
 pip3 install flask
 
-# 2. Tạo log mẫu để demo
-python3 make_sample_log.py
+# 2. Chạy server giám sát
+python3 server.py
 
-# 3a. Xem kết quả trên terminal
-python3 monitor.py access.log
+# 3. Mở dashboard: http://127.0.0.1:5000/__monitor
 
-# 3b. Hoặc xem trên trang web (đẹp hơn)
-python3 dashboard.py
-# → mở trình duyệt: http://127.0.0.1:5000
+# 4. Bắn request để test (chọn 1 trong 2):
+#    - Bằng script tự động:
+python3 attack_demo.py
+#    - Hoặc bằng Postman / trình duyệt, gửi tới http://127.0.0.1:5000/...
+#      vd SQLi: http://127.0.0.1:5000/product?id=1' OR '1'='1
+```
+
+Server nhận request → phân loại ngay → dashboard tự cập nhật mỗi 1.5 giây
+(dòng mới tô sáng vàng). Giả lập nhiều IP bằng header `X-Forwarded-For`.
+
+## Cách chạy — CÁCH 2: Đọc file log có sẵn
+
+```bash
+python3 make_sample_log.py       # tạo log mẫu
+python3 monitor.py access.log    # xem trên terminal
+python3 dashboard.py             # hoặc xem web: http://127.0.0.1:5000
 ```
 
 ## Dùng với web thật (không bắt buộc, phần nâng cao)
