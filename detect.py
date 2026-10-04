@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 """
 detect.py
-Chua toan bo "luat" (rule) de phat hien tan cong tu log web.
+Chứa toàn bộ "luật" (rule) để phát hiện tấn công từ log web.
 
-Co 2 nhom luat:
-  A. Kiem tra TUNG request (SQLi, XSS, cong cu quet, duong dan nhay cam)
-  B. Kiem tra THEO NHOM request trong 1 phut (DoS, DDoS)
+Có 2 nhóm luật:
+  A. Kiểm tra TỪNG request (SQLi, XSS, công cụ quét, đường dẫn nhạy cảm)
+  B. Kiểm tra THEO NHÓM request trong 1 phút (DoS, DDoS)
 """
 
 import re
@@ -13,18 +13,18 @@ from urllib.parse import unquote
 from collections import defaultdict
 
 # =========================================================
-# NGUONG CANH BAO - ban co the chinh de demo cho de thay
+# NGƯỠNG CẢNH BÁO - bạn có thể chỉnh để demo cho dễ thấy
 # =========================================================
-DOS_NGUONG = 100     # 1 IP gui > 100 request / phut  => nghi DoS
-DDOS_TONG = 300      # tong > 300 request / phut       => nghi DDoS
-DDOS_SO_IP = 50      # va co > 50 IP khac nhau         => nghi DDoS
+DOS_NGUONG = 100     # 1 IP gửi > 100 request / phút  => nghi DoS
+DDOS_TONG = 300      # tổng > 300 request / phút       => nghi DDoS
+DDOS_SO_IP = 50      # và có > 50 IP khác nhau          => nghi DDoS
 
 
 # =========================================================
-# NHOM A: LUAT KIEM TRA TUNG REQUEST
+# NHÓM A: LUẬT KIỂM TRA TỪNG REQUEST
 # =========================================================
 
-# Dau hieu SQL Injection
+# Dấu hiệu SQL Injection
 SQLI = [
     r"(?i)\bunion\b.+\bselect\b",
     r"(?i)\bor\b\s+\d+\s*=\s*\d+",     # or 1=1
@@ -37,7 +37,7 @@ SQLI = [
     r"(?i)@@version",
 ]
 
-# Dau hieu XSS
+# Dấu hiệu XSS
 XSS = [
     r"(?i)<script",
     r"(?i)onerror\s*=",
@@ -47,13 +47,13 @@ XSS = [
     r"(?i)<img[^>]+src",
 ]
 
-# Cong cu tan cong / quet lo hong (nhan qua User-Agent)
+# Công cụ tấn công / quét lỗ hổng (nhận qua User-Agent)
 CONG_CU = [
     "sqlmap", "nikto", "nmap", "masscan", "dirbuster",
     "gobuster", "hydra", "wpscan", "acunetix", "nessus", "fuzz",
 ]
 
-# Duong dan nhay cam - hacker hay do tim
+# Đường dẫn nhạy cảm - hacker hay dò tìm
 DUONG_DAN_NHAY_CAM = [
     "/wp-admin", "/wp-login", "/phpmyadmin", "/.env", "/.git",
     "/admin", "/config", "/shell", "/cmd", "/.aws", "/backup",
@@ -62,11 +62,11 @@ DUONG_DAN_NHAY_CAM = [
 
 def kiem_tra_request(e):
     """
-    Nhan vao 1 dong log (dictionary), tra ve danh sach canh bao.
-    Moi canh bao: (loai, muc_do, chi_tiet)
+    Nhận vào 1 dòng log (dictionary), trả về danh sách cảnh báo.
+    Mỗi cảnh báo: (loại, mức_độ, chi_tiết)
     """
     canh_bao = []
-    url = unquote(e.get("url", ""))     # giai ma URL (vd %27 -> ')
+    url = unquote(e.get("url", ""))     # giải mã URL (vd %27 -> ')
     agent = e.get("agent", "")
 
     # 1) SQL Injection
@@ -81,35 +81,35 @@ def kiem_tra_request(e):
             canh_bao.append(("XSS", "CAO", url[:120]))
             break
 
-    # 3) Cong cu quet lo hong
+    # 3) Công cụ quét lỗ hổng
     ua = agent.lower()
     for c in CONG_CU:
         if c in ua:
-            canh_bao.append(("Cong cu quet: " + c, "CAO", agent[:120]))
+            canh_bao.append(("Công cụ quét: " + c, "CAO", agent[:120]))
             break
 
-    # 4) Do tim duong dan nhay cam
+    # 4) Dò tìm đường dẫn nhạy cảm
     low = url.lower()
     for d in DUONG_DAN_NHAY_CAM:
         if d in low:
-            canh_bao.append(("Do tim duong dan nhay cam", "TRUNG BINH", url[:120]))
+            canh_bao.append(("Dò tìm đường dẫn nhạy cảm", "TRUNG BÌNH", url[:120]))
             break
 
     return canh_bao
 
 
 # =========================================================
-# NHOM B: LUAT KIEM TRA THEO NHOM (DoS / DDoS)
+# NHÓM B: LUẬT KIỂM TRA THEO NHÓM (DoS / DDoS)
 # =========================================================
 
 def kiem_tra_theo_phut(entries):
     """
-    Gom cac request theo tung PHUT, roi kiem tra DoS va DDoS.
-    Tra ve danh sach canh bao: (loai, muc_do, chi_tiet)
+    Gom các request theo từng PHÚT, rồi kiểm tra DoS và DDoS.
+    Trả về danh sách cảnh báo: (loại, mức_độ, chi_tiết)
     """
     canh_bao = []
 
-    # Gom log theo phut: { "2025-10-10 13:55": [entry, entry, ...] }
+    # Gom log theo phút: { "2025-10-10 13:55": [entry, entry, ...] }
     theo_phut = defaultdict(list)
     for e in entries:
         if e["dt"]:
@@ -119,39 +119,39 @@ def kiem_tra_theo_phut(entries):
     for phut, ds in theo_phut.items():
         tong = len(ds)
 
-        # Dem so request cua tung IP trong phut nay
+        # Đếm số request của từng IP trong phút này
         dem_ip = defaultdict(int)
         for e in ds:
             dem_ip[e["ip"]] += 1
 
-        # ---- DoS: 1 IP gui qua nhieu ----
+        # ---- DoS: 1 IP gửi quá nhiều ----
         for ip, so in dem_ip.items():
             if so > DOS_NGUONG:
                 canh_bao.append((
                     "DoS",
                     "CAO",
-                    f"IP {ip} gui {so} request trong phut {phut}",
+                    f"IP {ip} gửi {so} request trong phút {phut}",
                 ))
 
-        # ---- DDoS: tong cao + nhieu IP khac nhau ----
+        # ---- DDoS: tổng cao + nhiều IP khác nhau ----
         so_ip = len(dem_ip)
         if tong > DDOS_TONG and so_ip > DDOS_SO_IP:
             canh_bao.append((
                 "DDoS",
                 "CAO",
-                f"Phut {phut}: {tong} request tu {so_ip} IP khac nhau",
+                f"Phút {phut}: {tong} request từ {so_ip} IP khác nhau",
             ))
 
     return canh_bao
 
 
 # =========================================================
-# HAM PHU: lay tap IP bi DoS va tap phut bi DDoS
-# (dung de danh dau TUNG request tren dashboard)
+# HÀM PHỤ: lấy tập IP bị DoS và tập phút bị DDoS
+# (dùng để đánh dấu TỪNG request trên dashboard)
 # =========================================================
 
 def ip_bi_dos(entries):
-    """Tra ve tap cac IP gay DoS (gui qua nhieu request trong 1 phut)."""
+    """Trả về tập các IP gây DoS (gửi quá nhiều request trong 1 phút)."""
     dem = defaultdict(lambda: defaultdict(int))   # {phut: {ip: so}}
     for e in entries:
         if e["dt"]:
@@ -167,7 +167,7 @@ def ip_bi_dos(entries):
 
 
 def phut_bi_ddos(entries):
-    """Tra ve tap cac phut (chuoi 'Y-m-d H:M') bi DDoS."""
+    """Trả về tập các phút (chuỗi 'Y-m-d H:M') bị DDoS."""
     theo_phut = defaultdict(list)
     for e in entries:
         if e["dt"]:
@@ -182,14 +182,14 @@ def phut_bi_ddos(entries):
 
 
 # =========================================================
-# HAM TONG HOP: chay het tat ca luat tren toan bo log
+# HÀM TỔNG HỢP: chạy hết tất cả luật trên toàn bộ log
 # =========================================================
 
 def phan_tich(entries):
-    """Chay tat ca luat, tra ve danh sach canh bao day du."""
+    """Chạy tất cả luật, trả về danh sách cảnh báo đầy đủ."""
     ket_qua = []
 
-    # Nhom A - tung request
+    # Nhóm A - từng request
     for e in entries:
         for (loai, muc, ct) in kiem_tra_request(e):
             ket_qua.append({
@@ -200,7 +200,7 @@ def phan_tich(entries):
                 "chi_tiet": ct,
             })
 
-    # Nhom B - theo phut
+    # Nhóm B - theo phút
     for (loai, muc, ct) in kiem_tra_theo_phut(entries):
         ket_qua.append({
             "thoi_gian": "-",

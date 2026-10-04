@@ -1,38 +1,38 @@
 # -*- coding: utf-8 -*-
 """
 parser.py
-Doc file access.log cua web server (Nginx/Apache - dinh dang "combined")
-va tra ve tung dong duoi dang dictionary de de xu ly.
+Đọc file access.log của web server (Nginx/Apache - định dạng "combined")
+và trả về từng dòng dưới dạng dictionary để dễ xử lý.
 
-Dinh dang combined (mac dinh cua Nginx):
+Định dạng combined (mặc định của Nginx):
 127.0.0.1 - - [10/Oct/2025:13:55:36 +0700] "GET /index.html HTTP/1.1" 200 512 "-" "Mozilla/5.0 ..."
-  IP        user   thoi_gian        method  url       code size referer  user-agent
+  IP        user   thời_gian        method  url       mã  size referer  user-agent
 """
 
 import re
 from datetime import datetime
 
-# Bieu thuc chinh quy (regex) de tach 1 dong log ra tung phan
+# Biểu thức chính quy (regex) để tách 1 dòng log ra từng phần
 LOG_PATTERN = re.compile(
-    r'(?P<ip>\S+) \S+ \S+ '            # dia chi IP
-    r'\[(?P<time>[^\]]+)\] '           # thoi gian
+    r'(?P<ip>\S+) \S+ \S+ '            # địa chỉ IP
+    r'\[(?P<time>[^\]]+)\] '           # thời gian
     r'"(?P<method>\S+) (?P<url>.*?) \S+" '  # method + url
-    r'(?P<status>\d{3}) '              # ma trang thai (200, 404, 500...)
-    r'(?P<size>\S+) '                  # kich thuoc phan hoi
-    r'"(?P<referer>.*?)" '             # trang gioi thieu
-    r'"(?P<agent>.*?)"'                # trinh duyet / cong cu (User-Agent)
+    r'(?P<status>\d{3}) '              # mã trạng thái (200, 404, 500...)
+    r'(?P<size>\S+) '                  # kích thước phản hồi
+    r'"(?P<referer>.*?)" '             # trang giới thiệu
+    r'"(?P<agent>.*?)"'                # trình duyệt / công cụ (User-Agent)
 )
 
 
 def parse_line(line):
-    """Doc 1 dong log -> dictionary. Neu dong hong thi tra ve None."""
+    """Đọc 1 dòng log -> dictionary. Nếu dòng hỏng thì trả về None."""
     m = LOG_PATTERN.match(line.strip())
     if not m:
         return None
 
     d = m.groupdict()
 
-    # Chuyen thoi gian ve dang datetime cua Python
+    # Chuyển thời gian về dạng datetime của Python
     try:
         d["dt"] = datetime.strptime(d["time"].split()[0], "%d/%b/%Y:%H:%M:%S")
     except Exception:
@@ -43,7 +43,7 @@ def parse_line(line):
 
 
 def parse_file(path):
-    """Doc ca file log -> danh sach cac dictionary."""
+    """Đọc cả file log -> danh sách các dictionary."""
     entries = []
     with open(path, "r", encoding="utf-8", errors="ignore") as f:
         for line in f:
@@ -53,11 +53,11 @@ def parse_file(path):
     return entries
 
 
-# Chay thu: python3 parser.py access.log
+# Chạy thử: python3 parser.py access.log
 if __name__ == "__main__":
     import sys
     path = sys.argv[1] if len(sys.argv) > 1 else "access.log"
     data = parse_file(path)
-    print(f"Doc duoc {len(data)} dong hop le tu {path}")
+    print(f"Đọc được {len(data)} dòng hợp lệ từ {path}")
     for e in data[:3]:
         print(e["ip"], e["method"], e["url"], e["status"])

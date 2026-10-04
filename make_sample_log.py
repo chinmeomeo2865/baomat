@@ -1,18 +1,18 @@
 # -*- coding: utf-8 -*-
 """
 make_sample_log.py
-Tao 1 file access.log GIA LAP de demo he thong (khong tan cong web that).
-Log gom:
-  - Traffic binh thuong (nhieu IP, nhieu trang)
-  - 1 dot DoS (1 IP ban lien tuc)
-  - 1 dot DDoS (rat nhieu IP cung ban)
-  - Vai request SQL Injection / XSS
-  - Vai request tu cong cu quet (sqlmap, nikto)
-  - Vai request do tim duong dan nhay cam
+Tạo 1 file access.log GIẢ LẬP để demo hệ thống (không tấn công web thật).
+Log gồm:
+  - Traffic bình thường (nhiều IP, nhiều trang)
+  - 1 đợt DoS (1 IP bắn liên tục)
+  - 1 đợt DDoS (rất nhiều IP cùng bắn)
+  - Vài request SQL Injection / XSS
+  - Vài request từ công cụ quét (sqlmap, nikto)
+  - Vài request dò tìm đường dẫn nhạy cảm
 
-Cach dung:
+Cách dùng:
     python3 make_sample_log.py
-=> tao ra file access.log
+=> tạo ra file access.log
 """
 
 import random
@@ -44,7 +44,7 @@ def main():
     logs = []
     t = datetime.now().replace(second=0, microsecond=0) - timedelta(minutes=10)
 
-    # 1) Traffic binh thuong: 200 request rai deu
+    # 1) Traffic bình thường: 200 request rải đều
     for _ in range(200):
         logs.append(dong(
             ip_ngau_nhien(), "GET", random.choice(TRANG_THUONG),
@@ -52,7 +52,7 @@ def main():
             t + timedelta(seconds=random.randint(0, 540)),
         ))
 
-    # 2) DoS: 1 IP ban 150 request trong cung 1 phut
+    # 2) DoS: 1 IP bắn 150 request trong cùng 1 phút
     ke_tan_cong = "45.77.10.99"
     t_dos = t + timedelta(minutes=3)
     for _ in range(150):
@@ -61,7 +61,7 @@ def main():
             t_dos + timedelta(seconds=random.randint(0, 59)),
         ))
 
-    # 3) DDoS: 80 IP khac nhau, tong ~400 request trong 1 phut
+    # 3) DDoS: 80 IP khác nhau, tổng ~400 request trong 1 phút
     t_ddos = t + timedelta(minutes=6)
     for _ in range(400):
         logs.append(dong(
@@ -92,23 +92,23 @@ def main():
                          200, random.choice(UA_THUONG),
                          t + timedelta(minutes=4, seconds=random.randint(0, 59))))
 
-    # 6) Cong cu quet
+    # 6) Công cụ quét
     logs.append(dong("103.20.5.7", "GET", "/", 404, "sqlmap/1.7",
                      t + timedelta(minutes=5)))
     logs.append(dong("103.20.5.8", "GET", "/admin", 404, "Nikto/2.5",
                      t + timedelta(minutes=5, seconds=10)))
 
-    # 7) Do tim duong dan nhay cam
+    # 7) Dò tìm đường dẫn nhạy cảm
     for u in ["/wp-admin", "/.env", "/phpmyadmin", "/.git/config"]:
         logs.append(dong("185.9.9.9", "GET", u, 404, random.choice(UA_THUONG),
                          t + timedelta(minutes=5, seconds=random.randint(0, 59))))
 
-    # Sap xep theo thoi gian roi ghi ra file
+    # Xáo trộn thứ tự rồi ghi ra file
     random.shuffle(logs)
     with open("access.log", "w", encoding="utf-8") as f:
         f.write("\n".join(logs) + "\n")
 
-    print(f"Da tao access.log voi {len(logs)} dong (co ca traffic thuong va tan cong).")
+    print(f"Đã tạo access.log với {len(logs)} dòng (có cả traffic thường và tấn công).")
 
 
 if __name__ == "__main__":
