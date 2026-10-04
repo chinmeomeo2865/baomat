@@ -146,6 +146,42 @@ def kiem_tra_theo_phut(entries):
 
 
 # =========================================================
+# HAM PHU: lay tap IP bi DoS va tap phut bi DDoS
+# (dung de danh dau TUNG request tren dashboard)
+# =========================================================
+
+def ip_bi_dos(entries):
+    """Tra ve tap cac IP gay DoS (gui qua nhieu request trong 1 phut)."""
+    dem = defaultdict(lambda: defaultdict(int))   # {phut: {ip: so}}
+    for e in entries:
+        if e["dt"]:
+            phut = e["dt"].strftime("%Y-%m-%d %H:%M")
+            dem[phut][e["ip"]] += 1
+
+    ket_qua = set()
+    for phut, theo_ip in dem.items():
+        for ip, so in theo_ip.items():
+            if so > DOS_NGUONG:
+                ket_qua.add(ip)
+    return ket_qua
+
+
+def phut_bi_ddos(entries):
+    """Tra ve tap cac phut (chuoi 'Y-m-d H:M') bi DDoS."""
+    theo_phut = defaultdict(list)
+    for e in entries:
+        if e["dt"]:
+            theo_phut[e["dt"].strftime("%Y-%m-%d %H:%M")].append(e)
+
+    ket_qua = set()
+    for phut, ds in theo_phut.items():
+        so_ip = len(set(e["ip"] for e in ds))
+        if len(ds) > DDOS_TONG and so_ip > DDOS_SO_IP:
+            ket_qua.add(phut)
+    return ket_qua
+
+
+# =========================================================
 # HAM TONG HOP: chay het tat ca luat tren toan bo log
 # =========================================================
 
