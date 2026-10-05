@@ -19,7 +19,7 @@ from urllib.parse import quote
 SERVER = "http://127.0.0.1:5000"
 
 
-def ban(path, ip=None, agent="Mozilla/5.0 (demo)", method="GET", body=None):
+def ban(path, ip=None, agent="Mozilla/5.0 (demo)", method="GET", body=None, im_lang=False):
     """Gửi 1 request. Dùng header X-Forwarded-For để giả lập IP khác nhau."""
     url = SERVER + quote(path, safe="/?=&")   # mã hóa an toàn ký tự đặc biệt
     headers = {"User-Agent": agent}
@@ -29,8 +29,15 @@ def ban(path, ip=None, agent="Mozilla/5.0 (demo)", method="GET", body=None):
     req = ureq.Request(url, data=data, headers=headers, method=method)
     try:
         ureq.urlopen(req, timeout=3).read()
+        if not im_lang:
+            print(f"  [200 OK - HỢP LỆ]: {path}")
     except Exception as ex:
-        print("  (lỗi gửi:", ex, ")")
+        if hasattr(ex, "code"):
+            if not im_lang:
+                print(f"  [{ex.code} BỊ IPS CHẶN]: {path}")
+        else:
+            if not im_lang:
+                print(f"  (lỗi gửi: {ex})")
 
 
 def ip_ngau_nhien():
@@ -43,42 +50,44 @@ def main():
         ban(p, ip=ip_ngau_nhien())
         time.sleep(0.2)
 
-    print(">> 2. SQL Injection...")
+    print("\n>> 2. SQL Injection (Kỳ vọng: Bị IPS chặn 403)...")
     for p in ["/product?id=1' OR '1'='1",
               "/search?q=1 UNION SELECT user,pass FROM users",
               "/login?user=admin'--"]:
         ban(p, ip=ip_ngau_nhien())
         time.sleep(0.2)
 
-    print(">> 3. XSS...")
+    print("\n>> 3. XSS (Kỳ vọng: Bị IPS chặn 403)...")
     ban("/comment?text=<script>alert(1)</script>", ip=ip_ngau_nhien())
     ban("/search?q=<img src=x onerror=alert(document.cookie)>", ip=ip_ngau_nhien())
     time.sleep(0.2)
 
-    print(">> 4. Công cụ quét (sqlmap, nikto)...")
+    print("\n>> 4. Công cụ quét (Kỳ vọng: Bị IPS chặn 403)...")
     ban("/", ip="103.20.5.7", agent="sqlmap/1.7")
     ban("/admin", ip="103.20.5.8", agent="Nikto/2.5")
     time.sleep(0.2)
 
-    print(">> 5. Dò tìm đường dẫn nhạy cảm...")
+    print("\n>> 5. Dò tìm đường dẫn nhạy cảm (Kỳ vọng: Bị IPS chặn 403)...")
     for p in ["/wp-admin", "/.env", "/phpmyadmin", "/.git/config"]:
         ban(p, ip="185.9.9.9")
         time.sleep(0.1)
 
-    print(">> 6. Tấn công DoS: 1 IP bắn 25 request thật nhanh...")
+    print("\n>> 6. Tấn công DoS: 1 IP bắn 25 request thật nhanh...")
     for _ in range(25):
-        ban("/", ip="45.77.10.99", agent="python-requests/2.31")
+        ban("/", ip="45.77.10.99", agent="python-requests/2.31", im_lang=True)
+    print("  -> Đã gửi 25 request DoS (IPS sẽ chuyển sang chặn 429 khi vượt ngưỡng)")
 
-    print(">> 7. Tấn công DDoS: 60 request từ nhiều IP khác nhau (đa luồng)...")
+    print("\n>> 7. Tấn công DDoS: 60 request từ nhiều IP khác nhau (đa luồng)...")
     def mot_phat():
-        ban("/", ip=ip_ngau_nhien(), agent="Go-http-client/1.1")
+        ban("/", ip=ip_ngau_nhien(), agent="Go-http-client/1.1", im_lang=True)
     luong = [threading.Thread(target=mot_phat) for _ in range(60)]
     for t in luong:
         t.start()
     for t in luong:
         t.join()
+    print("  -> Đã gửi 60 request DDoS từ nhiều IP phân tán")
 
-    print("\nXONG! Mở http://127.0.0.1:5000/__monitor để xem kết quả.")
+    print("\n[HOÀN TẤT] Mở http://127.0.0.1:5000/__monitor để xem bảng nhật ký chặn của IPS.")
 
 
 if __name__ == "__main__":

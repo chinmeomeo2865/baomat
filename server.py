@@ -45,6 +45,10 @@ DDOS_IP_RT = 8       # ... và từ > 8 IP khác nhau    => DDoS
 METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"]
 
 
+# ------- CẤU HÌNH CHẾ ĐỘ PHÒNG THỦ (IPS / IDS) -------
+CHE_DO_IPS = True   # True: IPS (Chặn đứng tấn công với mã 403/429)
+                    # False: IDS (Chỉ giám sát và ghi log, trả mã 200)
+
 def lay_ip():
     """Lấy IP client. Ưu tiên X-Forwarded-For (để demo giả lập nhiều IP)."""
     xff = request.headers.get("X-Forwarded-For")
@@ -101,6 +105,15 @@ def ghi_nhan():
 
     loai, nguy, ly_do = phan_loai(ip, url_quet, agent)
 
+    # Quyết định mã trạng thái HTTP theo chế độ IPS
+    if CHE_DO_IPS and nguy != "OK":
+        if "DoS" in loai or "DDoS" in loai:
+            status = 429   # Too Many Requests (từ chối do DoS/DDoS)
+        else:
+            status = 403   # Forbidden (chặn SQLi, XSS, Scanner, Dò đường dẫn)
+    else:
+        status = 200       # Cho phép qua
+
     with LOCK:
         TONG += 1
         _ID += 1
@@ -113,12 +126,12 @@ def ghi_nhan():
             "url": duong_dan,
             "agent": agent,
             "body": body,
-            "status": 200,
+            "status": status,
             "loai": loai,
             "nguy": nguy,
             "ly_do": ly_do,
         })
-    return loai, nguy
+    return loai, nguy, status, ly_do
 
 
 # =========================================================
@@ -155,8 +168,17 @@ def du_lieu():
 
     return jsonify({
         "tong": TONG, "by": by, "so_ip": so_ip, "so_canh_bao": so_canh_bao,
+        "ips_mode": CHE_DO_IPS,
         "chart_labels": labels, "chart_data": data, "rows": rows,
     })
+
+
+@app.route("/__toggle_mode")
+def toggle_mode():
+    """Bật/tắt chế độ IPS (Chặn) và IDS (Chỉ giám sát)."""
+    global CHE_DO_IPS
+    CHE_DO_IPS = not CHE_DO_IPS
+    return jsonify({"ips": CHE_DO_IPS})
 
 
 @app.route("/__reset")
@@ -185,9 +207,28 @@ def monitor():
 def bat_request(p):
     if p == "favicon.ico":
         return ("", 204)
-    loai, nguy = ghi_nhan()
+    loai, nguy, status, ly_do = ghi_nhan()
+    
+    # NẾU Ở CHẾ ĐỘ IPS VÀ BỊ CHẶN:
+    if status == 403:
+        return jsonify({
+            "trang_thai": "BLOCKED",
+            "he_thong": "IPS / WAF Active Defense",
+            "thong_bao": "Yêu cầu bị từ chối truy cập (403 Forbidden)",
+            "phan_loai": loai,
+            "ly_do": ly_do,
+        }), 403
+    elif status == 429:
+        return jsonify({
+            "trang_thai": "RATE_LIMITED",
+            "he_thong": "IPS / WAF Active Defense",
+            "thong_bao": "Yêu cầu bị từ chối do vượt quá tần suất (429 Too Many Requests)",
+            "phan_loai": loai,
+            "ly_do": ly_do,
+        }), 429
+
     return jsonify({
-        "thong_bao": "Server đã nhận request",
+        "thong_bao": "Server đã tiếp nhận request hợp lệ",
         "phan_loai": loai,
         "muc_do": nguy,
     }), 200
@@ -203,7 +244,7 @@ HTML = r"""
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Giám sát tấn công web (Realtime)</title>
+<title>Hệ thống giám sát &amp; ngăn chặn tấn công web (IPS)</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <style>
   * { box-sizing: border-box; }
@@ -223,7 +264,7 @@ HTML = r"""
           box-shadow:0 1px 3px rgba(0,0,0,.08); }
   .card .num { font-size:24px; font-weight:bold; }
   .card .lbl { color:#6b7280; font-size:12px; margin-top:2px; }
-  .c2 { color:#16a34a; } .c3 { color:#0891b2; } .c4 { color:#d97706; }
+  .c2 { color:#16a34a; } .c3 { color:#0891b2; } .c4 { color:#dc2626; }
   .c5 { color:#dc2626; } .cr { color:#dc2626; }
   .box { background:#fff; border-radius:10px; padding:18px; margin-bottom:18px;
          box-shadow:0 1px 3px rgba(0,0,0,.08); }
@@ -239,9 +280,9 @@ HTML = r"""
   tbody tr:hover { background:#f8fafc; }
   tbody tr.moi { animation: hl 1.2s ease-out; }
   @keyframes hl { from { background:#fef08a; } to { background:transparent; } }
-  .st { font-weight:bold; padding:1px 7px; border-radius:6px; color:#fff; font-size:12px; }
+  .st { font-weight:bold; padding:2px 8px; border-radius:6px; color:#fff; font-size:12px; }
   .s2 { background:#16a34a; } .s3 { background:#0891b2; }
-  .s4 { background:#d97706; } .s5 { background:#dc2626; }
+  .s4 { background:#dc2626; } .s5 { background:#dc2626; }
   .badge { padding:2px 8px; border-radius:12px; font-size:11px; color:#fff; margin-right:3px;
            display:inline-block; }
   .bCAO { background:#dc2626; } .bTB { background:#f59e0b; } .bOK { background:#9ca3af; }
@@ -265,30 +306,34 @@ HTML = r"""
 </head>
 <body>
 <header>
-  <h1>Hệ thống giám sát &amp; phát hiện tấn công web — REALTIME</h1>
-  <span class="live" id="live">● Đang nhận dữ liệu trực tiếp</span>
+  <h1>Hệ thống giám sát &amp; ngăn chặn tấn công web (IPS / WAF)</h1>
+  <div style="display:flex;align-items:center;gap:12px;">
+    <button id="btnMode" onclick="doiCheDo()" style="font-weight:bold;padding:6px 14px;border-radius:20px;border:none;cursor:pointer;background:#dc2626;color:#fff;transition:0.2s;">
+      🛡️ Chế độ: IPS (ĐANG CHẶN)
+    </button>
+    <span class="live" id="live">● Đang nhận dữ liệu trực tiếp</span>
+  </div>
 </header>
 <div class="tabs">
-  <div class="tab active" onclick="moTab('giamsat', this)">Giám sát</div>
+  <div class="tab active" onclick="moTab('giamsat', this)">Giám sát &amp; Phòng thủ</div>
   <div class="tab" onclick="moTab('tailieu', this)">Tài liệu kỹ thuật</div>
 </div>
 
 <!-- TAB GIÁM SÁT -->
 <div class="wrap page active" id="giamsat">
   <div class="hint">
-    Gửi thử request tới server để xem nó hiện lên ngay:
-    <code>http://127.0.0.1:5000/product?id=1' OR '1'='1</code> (SQLi) ·
-    <code>/comment?text=&lt;script&gt;</code> (XSS) ·
-    chạy <code>python3 attack_demo.py</code> để demo DoS/DDoS.
+    <b>Chế độ IPS đang kích hoạt:</b> Mọi request tấn công (SQLi, XSS, Scanner, Dò đường dẫn) sẽ bị <b>chặn đứng với mã 403 Forbidden</b>.
+    Tấn công DoS/DDoS sẽ bị <b>chặn với mã 429 Too Many Requests</b>.
+    (Bạn có thể bấm nút góc trên bên phải để chuyển qua lại giữa <b>IPS (Chặn)</b> và <b>IDS (Chỉ giám sát)</b>).
   </div>
 
   <div class="cards">
     <div class="card"><div class="num" id="tong">0</div><div class="lbl">Tổng request</div></div>
-    <div class="card"><div class="num c2" id="n2">0</div><div class="lbl">2xx Thành công</div></div>
-    <div class="card"><div class="num c4" id="n4">0</div><div class="lbl">4xx Lỗi client</div></div>
+    <div class="card"><div class="num c2" id="n2">0</div><div class="lbl">2xx Cho phép qua</div></div>
+    <div class="card"><div class="num c4" id="n4">0</div><div class="lbl">4xx Bị chặn (IPS)</div></div>
     <div class="card"><div class="num c5" id="n5">0</div><div class="lbl">5xx Lỗi server</div></div>
     <div class="card"><div class="num" id="soip">0</div><div class="lbl">Số IP khác nhau</div></div>
-    <div class="card"><div class="num cr" id="canhbao">0</div><div class="lbl">Request nghi tấn công</div></div>
+    <div class="card"><div class="num cr" id="canhbao">0</div><div class="lbl">Đã phát hiện &amp; chặn</div></div>
   </div>
 
   <div class="box">
@@ -302,7 +347,9 @@ HTML = r"""
       <label>Mã:
         <select id="fStatus" onchange="ve()">
           <option value="all">Tất cả</option>
-          <option value="2xx">2xx</option><option value="4xx">4xx</option><option value="5xx">5xx</option>
+          <option value="2xx">2xx (Hợp lệ)</option>
+          <option value="4xx">4xx (Bị chặn)</option>
+          <option value="5xx">5xx (Lỗi server)</option>
         </select>
       </label>
       <label>Phân loại:
@@ -333,33 +380,29 @@ HTML = r"""
 <!-- TAB TÀI LIỆU -->
 <div class="wrap page doc" id="tailieu">
   <div class="box">
-    <h2>1. Ý nghĩa các mã trạng thái HTTP</h2>
+    <h2>1. Ý nghĩa các mã trạng thái HTTP trong hệ thống IPS</h2>
     <table>
       <tr><th>Mã</th><th>Ý nghĩa</th><th>Liên quan bảo mật</th></tr>
-      <tr><td><code>200</code></td><td>Thành công</td><td>Bình thường</td></tr>
-      <tr><td><code>301/302</code></td><td>Chuyển hướng</td><td>Bình thường</td></tr>
-      <tr><td><code>400</code></td><td>Request sai cú pháp</td><td>Có thể do payload tấn công bị lỗi</td></tr>
-      <tr><td><code>401</code></td><td>Chưa đăng nhập</td><td>Nhiều 401 = dò mật khẩu (brute-force)</td></tr>
-      <tr><td><code>403</code></td><td>Bị cấm</td><td>Có thể đang dò quyền truy cập</td></tr>
-      <tr><td><code>404</code></td><td>Không tìm thấy</td><td>Nhiều 404 từ 1 IP = đang quét</td></tr>
-      <tr><td><code>429</code></td><td>Gửi quá nhiều</td><td>Dấu hiệu DoS</td></tr>
-      <tr><td><code>500</code></td><td>Lỗi server</td><td>SQL Injection hay gây lỗi 500</td></tr>
-      <tr><td><code>503</code></td><td>Quá tải</td><td>Dấu hiệu DDoS</td></tr>
+      <tr><td><code>200</code></td><td>Thành công</td><td>Request hợp lệ, IPS cho phép đi vào ứng dụng</td></tr>
+      <tr><td><code>403</code></td><td>Bị cấm (Forbidden)</td><td><b>Bị IPS CHẶN</b>: phát hiện SQL Injection, XSS, Scanner, File nhạy cảm</td></tr>
+      <tr><td><code>429</code></td><td>Quá nhiều yêu cầu</td><td><b>Bị IPS CHẶN</b>: phát hiện DoS hoặc DDoS (Rate Limit)</td></tr>
+      <tr><td><code>400</code></td><td>Request sai cú pháp</td><td>Payload tấn công bị dị dạng</td></tr>
+      <tr><td><code>404</code></td><td>Không tìm thấy</td><td>Dò tìm đường dẫn không tồn tại</td></tr>
+      <tr><td><code>500</code></td><td>Lỗi server</td><td>Lỗi mã nguồn hoặc SQL Injection khai thác sâu</td></tr>
+      <tr><td><code>503</code></td><td>Quá tải</td><td>Hệ thống server bị kiệt quệ tài nguyên</td></tr>
     </table>
   </div>
   <div class="box">
     <h2>2. Cách phân biệt các loại tấn công</h2>
     <table>
-      <tr><th>Loại</th><th>Dựa vào đâu để nhận biết</th><th>Ví dụ dấu hiệu</th></tr>
-      <tr><td><b>DoS</b></td><td>1 IP gửi quá nhiều request trong {{ cua_so }}s (ngưỡng {{ dos }})</td><td>1 IP gửi 20 request/10s</td></tr>
-      <tr><td><b>DDoS</b></td><td>Tổng tăng vọt + nhiều IP (&gt;{{ ddos_tong }} req &amp; &gt;{{ ddos_ip }} IP /{{ cua_so }}s)</td><td>60 request từ 30 IP</td></tr>
-      <tr><td><b>SQL Injection</b></td><td>URL/body chứa cú pháp SQL</td><td><code>' OR 1=1</code>, <code>UNION SELECT</code>, <code>--</code></td></tr>
-      <tr><td><b>XSS</b></td><td>URL/body chứa mã HTML/JS</td><td><code>&lt;script&gt;</code>, <code>onerror=</code></td></tr>
-      <tr><td><b>Công cụ quét</b></td><td>User-Agent là tên công cụ tấn công</td><td><code>sqlmap</code>, <code>nikto</code></td></tr>
-      <tr><td><b>Dò tìm đường dẫn</b></td><td>Truy cập đường dẫn quản trị/nhạy cảm</td><td><code>/wp-admin</code>, <code>/.env</code></td></tr>
+      <tr><th>Loại</th><th>Dựa vào đâu để nhận biết</th><th>Hành vi xử lý của IPS</th></tr>
+      <tr><td><b>DoS</b></td><td>1 IP gửi quá nhiều request trong {{ cua_so }}s (ngưỡng {{ dos }})</td><td>Chặn tức thì với mã <code>429 Too Many Requests</code></td></tr>
+      <tr><td><b>DDoS</b></td><td>Tổng tăng vọt + nhiều IP (&gt;{{ ddos_tong }} req &amp; &gt;{{ ddos_ip }} IP /{{ cua_so }}s)</td><td>Chặn phân tán với mã <code>429 Too Many Requests</code></td></tr>
+      <tr><td><b>SQL Injection</b></td><td>URL/body chứa cú pháp SQL (<code>' OR 1=1</code>, <code>UNION SELECT</code>)</td><td>Chặn tức thì với mã <code>403 Forbidden</code></td></tr>
+      <tr><td><b>XSS</b></td><td>URL/body chứa thẻ HTML/JS (<code>&lt;script&gt;</code>, <code>onerror=</code>)</td><td>Chặn tức thì với mã <code>403 Forbidden</code></td></tr>
+      <tr><td><b>Công cụ quét</b></td><td>User-Agent định danh các tool (<code>sqlmap</code>, <code>nikto</code>...)</td><td>Chặn tức thì với mã <code>403 Forbidden</code></td></tr>
+      <tr><td><b>Dò tìm đường dẫn</b></td><td>Truy cập file nhạy cảm (<code>/.env</code>, <code>/wp-admin</code>...)</td><td>Chặn tức thì với mã <code>403 Forbidden</code></td></tr>
     </table>
-    <p class="muted">Phân biệt nhanh: tấn công <b>theo nội dung</b> (SQLi, XSS) nhìn URL;
-    <b>theo số lượng</b> (DoS, DDoS) nhìn số request/giây; <b>thăm dò</b> (quét, dò đường dẫn) nhìn User-Agent và mã 404.</p>
   </div>
 </div>
 
@@ -373,8 +416,15 @@ HTML = r"""
 
 <script>
 let DATA = [];
-let bietId = 0;          // id request mới nhất đã thấy (để tô sáng dòng mới)
-const NHAN_MA = {200:"OK - thành công",403:"Forbidden - bị cấm",404:"Not Found",500:"Lỗi server (có thể do SQLi)",503:"Quá tải (nghi DDoS)"};
+let bietId = 0;
+const NHAN_MA = {
+  200:"200 OK (Hợp lệ, được phép qua)",
+  403:"403 Forbidden (BỊ IPS CHẶN: Nội dung độc hại / Quét)",
+  429:"429 Too Many Requests (BỊ IPS CHẶN: DoS / DDoS)",
+  404:"404 Not Found",
+  500:"500 Lỗi server",
+  503:"503 Quá tải"
+};
 
 let chart;
 function taoChart(){
@@ -425,6 +475,7 @@ function xem(id){
     +'<b>Mã trạng thái</b><span>'+r.status+' - '+ten+'</span>'
     +'<b>User-Agent</b><span>'+esc(r.agent)+'</span>'
     +'<b>Phân loại</b><span>'+r.loai.join(', ')+' (mức độ: '+r.nguy+')</span>'
+    +'<b>Hành vi IPS</b><span>'+(r.status>=400 ? '⛔ ĐÃ BỊ TỪ CHỐI / CHẶN TẠI CỬA' : '✅ ĐÃ CHO PHÉP TRUY CẬP')+'</span>'
     +'<b>Lý do đánh dấu</b><span>'+esc(r.ly_do||'Không có dấu hiệu tấn công')+'</span>';
   document.getElementById('overlay').style.display='flex';
 }
@@ -435,6 +486,25 @@ function moTab(id,el){
   document.getElementById(id).classList.add('active'); el.classList.add('active');
 }
 async function reset(){ await fetch('/__reset'); bietId=0; capNhat(); }
+
+async function doiCheDo(){
+  const r=await fetch('/__toggle_mode');
+  const d=await r.json();
+  capNhatNutMode(d.ips);
+  capNhat();
+}
+
+function capNhatNutMode(isIps){
+  const btn=document.getElementById('btnMode');
+  if(!btn) return;
+  if(isIps){
+    btn.style.background='#dc2626';
+    btn.textContent='🛡️ Chế độ: IPS (ĐANG CHẶN)';
+  } else {
+    btn.style.background='#d97706';
+    btn.textContent='👁️ Chế độ: IDS (CHỈ GIÁM SÁT)';
+  }
+}
 
 async function capNhat(){
   try{
@@ -447,6 +517,7 @@ async function capNhat(){
     document.getElementById('n5').textContent=d.by['5xx']||0;
     document.getElementById('soip').textContent=d.so_ip;
     document.getElementById('canhbao').textContent=d.so_canh_bao;
+    capNhatNutMode(d.ips_mode);
     chart.data.labels=d.chart_labels; chart.data.datasets[0].data=d.chart_data; chart.update();
     const maxId = d.rows.length ? Math.max(...d.rows.map(x=>x.id)) : bietId;
     DATA=d.rows; ve(); bietId=maxId;
