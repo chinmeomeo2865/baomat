@@ -15,6 +15,7 @@ Cách dùng:
 => tạo ra file access.log
 """
 
+import sys
 import random
 from datetime import datetime, timedelta
 
@@ -112,4 +113,5 @@ def main():
 
 
 if __name__ == "__main__":
+    sys.stdout.reconfigure(encoding="utf-8")   # tránh lỗi in tiếng Việt trên terminal Windows
     main()

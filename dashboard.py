@@ -10,9 +10,10 @@ Hệ thống QUẢN LÝ & giám sát log web.
 
 Cách dùng:
     python3 dashboard.py
-    -> http://127.0.0.1:5000
+    -> http://127.0.0.1:5001
 """
 
+import sys
 from collections import Counter, defaultdict
 from urllib.parse import unquote
 from flask import Flask, render_template_string
@@ -84,7 +85,7 @@ HTML = r"""
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Hệ thống giám sát tấn công web</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="/static/chart.umd.min.js"></script>  <!-- Chart.js lưu sẵn trong static/: demo không cần Internet -->
 <style>
   * { box-sizing: border-box; }
   body { font-family: Arial, sans-serif; margin:0; background:#f1f5f9; color:#1f2937; }
@@ -373,5 +374,6 @@ def trang_chu():
 
 
 if __name__ == "__main__":
-    print("Mở trình duyệt: http://127.0.0.1:5000")
-    app.run(debug=True, port=5000)
+    sys.stdout.reconfigure(encoding="utf-8")   # tránh lỗi in tiếng Việt trên terminal Windows
+    print("Mở trình duyệt: http://127.0.0.1:5001")
+    app.run(debug=True, port=5001)   # 5001: chạy song song được với server.py (5000)

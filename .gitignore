@@ -2,3 +2,4 @@ __pycache__/
 *.pyc
 access.log
 .DS_Store
+realtime_access.log

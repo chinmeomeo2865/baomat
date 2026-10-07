@@ -17,10 +17,12 @@ Mẹo demo:
   - Giả lập nhiều IP khác nhau: đặt header  X-Forwarded-For: <ip>
 """
 
+import sys
 import time
 import threading
 from collections import deque
 from datetime import datetime
+from functools import wraps
 from urllib.parse import unquote
 
 from flask import Flask, request, jsonify, render_template_string
@@ -28,6 +30,8 @@ from flask import Flask, request, jsonify, render_template_string
 import detect
 
 app = Flask(__name__)
+# Body lớn hơn 1 MB bị Flask từ chối luôn (413), nên body nào lọt vào đều được quét toàn bộ
+app.config["MAX_CONTENT_LENGTH"] = 1024 * 1024
 
 # ------- Bộ nhớ lưu request gần đây (sống trong RAM) -------
 REQUESTS = deque(maxlen=1000)   # các request gần nhất
@@ -44,23 +48,36 @@ DDOS_IP_RT = 8       # ... và từ > 8 IP khác nhau    => DDoS
 
 METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"]
 
+# Máy chạy server. Chỉ tin X-Forwarded-For khi request đến từ đây (coi như proxy
+# tin cậy), và chỉ cho phép thao tác quản trị từ đây.
+MAY_TIN_CAY = ("127.0.0.1", "::1")
+
+# Mọi request được ghi thêm ra file theo định dạng Combined Log Format (giống Nginx)
+# -> tắt server không mất log, và phân tích lại được: python monitor.py realtime_access.log
+FILE_LOG = "realtime_access.log"
+
 
 # ------- CẤU HÌNH CHẾ ĐỘ PHÒNG THỦ (IPS / IDS) -------
 CHE_DO_IPS = True   # True: IPS (Chặn đứng tấn công với mã 403/429)
                     # False: IDS (Chỉ giám sát và ghi log, trả mã 200)
 
 def lay_ip():
-    """Lấy IP client. Ưu tiên X-Forwarded-For (để demo giả lập nhiều IP)."""
+    """
+    Lấy IP client. Nếu request đến từ máy tin cậy (attack_demo.py, Postman trên
+    cùng máy) thì dùng X-Forwarded-For để giả lập nhiều IP khi demo.
+    Request từ máy khác thì luôn dùng IP kết nối thật: kẻ tấn công không thể
+    đổi X-Forwarded-For liên tục để né luật DoS.
+    """
+    ip_that = request.remote_addr or "?"
     xff = request.headers.get("X-Forwarded-For")
-    if xff:
+    if xff and ip_that in MAY_TIN_CAY:
         return xff.split(",")[0].strip()
-    return request.remote_addr or "?"
+    return ip_that
 
 
-def phan_loai(ip, url_full, agent):
+def phan_loai(ip, e):
     """Chạy luật phát hiện cho 1 request vừa tới. Trả về (loai_list, nguy, ly_do)."""
     # 1) Luật theo NỘI DUNG (SQLi, XSS, công cụ quét, dò đường dẫn)
-    e = {"url": url_full, "agent": agent, "ip": ip, "status": 200}
     nhan = detect.kiem_tra_request(e)
 
     # 2) Luật theo SỐ LƯỢNG (DoS, DDoS) - tính trên cửa sổ 10 giây
@@ -97,13 +114,17 @@ def ghi_nhan():
 
     ip = lay_ip()
     method = request.method
-    # Gộp đường dẫn + query + body để quét (SQLi/XSS có thể nằm ở body)
     duong_dan = request.full_path.rstrip("?")
-    body = request.get_data(as_text=True)[:1000]
-    url_quet = unquote(duong_dan) + (" " + body if body else "")
+    body = request.get_data(as_text=True)      # quét TOÀN BỘ body, không cắt
     agent = request.headers.get("User-Agent", "")
 
-    loai, nguy, ly_do = phan_loai(ip, url_quet, agent)
+    # SQLi/XSS có thể nằm ở URL, body, Cookie, Referer hoặc User-Agent
+    e = {
+        "url": unquote(duong_dan), "body": body, "agent": agent,
+        "referer": request.headers.get("Referer", ""),
+        "cookie": request.headers.get("Cookie", ""),
+    }
+    loai, nguy, ly_do = phan_loai(ip, e)
 
     # Quyết định mã trạng thái HTTP theo chế độ IPS
     if CHE_DO_IPS and nguy != "OK":
@@ -125,13 +146,32 @@ def ghi_nhan():
             "method": method,
             "url": duong_dan,
             "agent": agent,
-            "body": body,
+            "body": body[:1000],                # chỉ lưu 1000 ký tự đầu để hiển thị
             "status": status,
             "loai": loai,
             "nguy": nguy,
             "ly_do": ly_do,
         })
+        ghi_file_log(ip, method, e["url"], status, e["referer"], agent)
     return loai, nguy, status, ly_do
+
+
+def ghi_file_log(ip, method, url, status, referer, agent):
+    """Ghi 1 dòng Combined Log Format ra FILE_LOG (gọi khi đang giữ LOCK)."""
+    # Mã hoá ký tự làm hỏng dòng log (dấu ", xuống dòng, khoảng trắng trong URL).
+    # URL dùng %xx để detect.py giải mã lại được đúng payload gốc.
+    for k, v in (("%", "%25"), ('"', "%22"), ("\n", "%0A"), ("\r", "%0D"), (" ", "%20")):
+        url = url.replace(k, v)
+    def tho(s):
+        return s.replace('"', "\\x22").replace("\n", "\\x0A").replace("\r", "\\x0D")
+    tg = datetime.now().astimezone().strftime("%d/%b/%Y:%H:%M:%S %z")
+    dong = (f'{ip} - - [{tg}] "{method} {url} HTTP/1.1" {status} - '
+            f'"{tho(referer or "-")}" "{tho(agent)}"\n')
+    try:
+        with open(FILE_LOG, "a", encoding="utf-8") as f:
+            f.write(dong)
+    except OSError:
+        pass   # lỗi ghi file không được làm sập IPS
 
 
 # =========================================================
@@ -173,7 +213,25 @@ def du_lieu():
     })
 
 
-@app.route("/__toggle_mode")
+def chi_quan_tri(f):
+    """
+    Chỉ cho phép thao tác quản trị (tắt IPS, xoá log) khi:
+      - request đến từ chính máy chạy server (127.0.0.1 / ::1). Dùng
+        remote_addr thật, KHÔNG dùng X-Forwarded-For vì header đó giả mạo được;
+      - có header X-IPS-Admin. Form/thẻ <img> từ trang web khác không tự
+        gắn được header này, nên chống được tấn công CSRF.
+    """
+    @wraps(f)
+    def boc(*args, **kwargs):
+        if request.remote_addr not in MAY_TIN_CAY or \
+                request.headers.get("X-IPS-Admin") != "1":
+            return jsonify({"loi": "Không có quyền quản trị IPS"}), 403
+        return f(*args, **kwargs)
+    return boc
+
+
+@app.route("/__toggle_mode", methods=["POST"])
+@chi_quan_tri
 def toggle_mode():
     """Bật/tắt chế độ IPS (Chặn) và IDS (Chỉ giám sát)."""
     global CHE_DO_IPS
@@ -181,7 +239,8 @@ def toggle_mode():
     return jsonify({"ips": CHE_DO_IPS})
 
 
-@app.route("/__reset")
+@app.route("/__reset", methods=["POST"])
+@chi_quan_tri
 def reset():
     """Xoá hết log đang hiển thị (để demo lại từ đầu)."""
     global TONG
@@ -245,7 +304,7 @@ HTML = r"""
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Hệ thống giám sát &amp; ngăn chặn tấn công web (IPS)</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="/static/chart.umd.min.js"></script>  <!-- Chart.js lưu sẵn trong static/: demo không cần Internet -->
 <style>
   * { box-sizing: border-box; }
   body { font-family: Arial, sans-serif; margin:0; background:#f1f5f9; color:#1f2937; }
@@ -428,6 +487,7 @@ const NHAN_MA = {
 
 let chart;
 function taoChart(){
+  if (typeof Chart === 'undefined') return;   // thiếu Chart.js thì bỏ biểu đồ, bảng vẫn chạy
   chart = new Chart(document.getElementById('bd'), {
     type:'line',
     data:{ labels:[], datasets:[{label:'Request', data:[], borderColor:'#2563eb',
@@ -485,10 +545,13 @@ function moTab(id,el){
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
   document.getElementById(id).classList.add('active'); el.classList.add('active');
 }
-async function reset(){ await fetch('/__reset'); bietId=0; capNhat(); }
+// Thao tác quản trị: bắt buộc POST + header X-IPS-Admin (xem chi_quan_tri trong server.py)
+const QUAN_TRI = {method:'POST', headers:{'X-IPS-Admin':'1'}};
+async function reset(){ await fetch('/__reset', QUAN_TRI); bietId=0; capNhat(); }
 
 async function doiCheDo(){
-  const r=await fetch('/__toggle_mode');
+  const r=await fetch('/__toggle_mode', QUAN_TRI);
+  if(!r.ok){ alert('Không có quyền đổi chế độ (chỉ thao tác được trên máy chạy server)'); return; }
   const d=await r.json();
   capNhatNutMode(d.ips);
   capNhat();
@@ -518,7 +581,7 @@ async function capNhat(){
     document.getElementById('soip').textContent=d.so_ip;
     document.getElementById('canhbao').textContent=d.so_canh_bao;
     capNhatNutMode(d.ips_mode);
-    chart.data.labels=d.chart_labels; chart.data.datasets[0].data=d.chart_data; chart.update();
+    if(chart){ chart.data.labels=d.chart_labels; chart.data.datasets[0].data=d.chart_data; chart.update(); }
     const maxId = d.rows.length ? Math.max(...d.rows.map(x=>x.id)) : bietId;
     DATA=d.rows; ve(); bietId=maxId;
   }catch(e){
@@ -537,6 +600,7 @@ setInterval(capNhat, 1500);   // tự cập nhật mỗi 1.5 giây
 
 
 if __name__ == "__main__":
+    sys.stdout.reconfigure(encoding="utf-8")   # tránh lỗi in tiếng Việt trên terminal Windows
     print("=" * 55)
     print(" SERVER GIÁM SÁT REALTIME đang chạy")
     print(" Dashboard:  http://127.0.0.1:5000/__monitor")

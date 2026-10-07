@@ -22,12 +22,20 @@ Ngay trên thanh header của Dashboard, hệ thống trang bị nút chuyển �
 
 | Loại tấn công | Kỹ thuật & Mẫu nhận diện | Phản hồi của IPS |
 |---|---|:---:|
-| **1. SQL Injection** | Regex dò cú pháp SQL: `' OR 1=1`, `UNION SELECT`, `SLEEP()`, `--`, `information_schema`... | **`403 Forbidden`** |
-| **2. Cross-Site Scripting (XSS)** | Regex dò thẻ HTML & Event JS: `<script>`, `onerror=`, `onload=`, `document.cookie`... | **`403 Forbidden`** |
+| **1. SQL Injection** | Regex dò cú pháp SQL: `' OR 1=1`, `UNION SELECT`, `SLEEP()`, `admin'--`, `information_schema`... Quét cả **URL, Body, Cookie, Referer, User-Agent**; chống lách bằng ký tự xuống dòng (`%0a`) | **`403 Forbidden`** |
+| **2. Cross-Site Scripting (XSS)** | Regex dò thẻ HTML & Event JS: `<script>`, `onerror=`, `onload=`, `document.cookie`... (quét cùng các trường như SQLi) | **`403 Forbidden`** |
 | **3. Công cụ quét lỗ hổng** | So khớp User-Agent với Blacklist: `sqlmap`, `nikto`, `nmap`, `dirbuster`, `gobuster`, `wpscan`... | **`403 Forbidden`** |
-| **4. Dò tìm đường dẫn nhạy cảm** | Dò danh sách đường dẫn quản trị/file cấu hình: `/.env`, `/.git`, `/wp-admin`, `/phpmyadmin`... | **`403 Forbidden`** |
-| **5. DoS (Đơn nguồn)** | Thuật toán **Sliding Window 10s**: 1 IP gửi > 15 request/10s (hoặc > 100 req/phút trong log) | **`429 Too Many Requests`** |
-| **6. DDoS (Phân tán)** | Tổng lưu lượng tăng vọt (> 40 req/10s) **đồng thời** đến từ nhiều IP khác nhau (> 8 IP/10s) | **`429 Too Many Requests`** |
+| **4. Dò tìm đường dẫn nhạy cảm** | Dò danh sách đường dẫn quản trị/file cấu hình: `/.env`, `/.git`, `/wp-admin`, `/phpmyadmin`... So khớp **nguyên đoạn đường dẫn** (`/admin`, `/backup.zip` bị chặn, còn `/administrator-guide` thì không) | **`403 Forbidden`** |
+| **5. DoS (Đơn nguồn)** | Realtime: **cửa sổ trượt 10s**, 1 IP gửi > 15 request/10s. Phân tích log: gom theo **từng phút**, 1 IP > 100 request/phút | **`429 Too Many Requests`** |
+| **6. DDoS (Phân tán)** | Realtime: tổng > 40 request/10s **đồng thời** từ > 8 IP khác nhau. Phân tích log: > 300 request/phút từ > 50 IP | **`429 Too Many Requests`** |
+
+> Hai chế độ dùng ngưỡng khác nhau: realtime để ngưỡng thấp cho dễ demo bằng tay, còn phân tích log dùng ngưỡng sát thực tế hơn. Vì vậy chạy `attack_demo.py` rồi phân tích lại `realtime_access.log` sẽ **không** ra DoS/DDoS (25–60 request chưa vượt 100/300 request/phút).
+
+### 🔒 Tự bảo vệ của IPS
+* **Endpoint quản trị** `/__toggle_mode` (tắt/bật IPS) và `/__reset` (xoá log) chỉ nhận **POST** từ **chính máy chạy server** và phải có header `X-IPS-Admin: 1` (chống CSRF). Request từ máy khác bị trả **403**.
+* **`X-Forwarded-For`** chỉ được tin khi request đến từ chính máy chạy server (để `attack_demo.py`/Postman giả lập nhiều IP). Máy khác đổi header này cũng không né được luật DoS.
+* **Body** được quét toàn bộ; body > 1 MB bị từ chối luôn (**413**).
+* Mọi request realtime được ghi ra **`realtime_access.log`** (định dạng Nginx), tắt server không mất bằng chứng.
 
 > **Lưu ý lý thuyết trong báo cáo** (3 dạng tấn công không thể bắt qua Web Log):
 > * **Giả mạo DNS (DNS Spoofing)**: Xảy ra ở tầng phân giải tên miền phía client/ISP. Phòng chống: DNSSEC, HTTPS HSTS.
@@ -41,17 +49,21 @@ Ngay trên thanh header của Dashboard, hệ thống trang bị nút chuyển �
 | File | Vai trò kỹ thuật |
 |---|---|
 | **`server.py`** | **(Chính) Server WAF / IPS Realtime**: Tiếp nhận request, phân loại tức thì, chặn 403/429, cung cấp Dashboard sống tự cập nhật mỗi 1.5s và API chuyển đổi chế độ IDS/IPS |
-| **`detect.py`** | **Trái tim hệ thống (Rule Engine)**: Chứa toàn bộ biểu thức chính quy (Regex) và thuật toán đếm cửa sổ thời gian trượt (Sliding Window) |
+| **`detect.py`** | **Trái tim hệ thống (Rule Engine)**: Chứa toàn bộ biểu thức chính quy (Regex) và luật đếm DoS/DDoS theo phút cho chế độ phân tích log (cửa sổ trượt 10s của realtime nằm trong `server.py`) |
 | **`attack_demo.py`** | **Tool test tấn công tự động**: Bắn đa luồng thử nghiệm các loại request (Bình thường, SQLi, XSS, Scanner, DoS, DDoS), in rõ kết quả chặn của IPS |
 | **`parser.py`** | Bóc tách định dạng Combined Log Format của Nginx/Apache thành Dictionary |
 | **`monitor.py`** | Công cụ CLI: Đọc file log tĩnh và in báo cáo an ninh mạng ra Terminal |
 | **`dashboard.py`** | Giao diện Web phân tích file log tĩnh có sẵn bộ lọc theo mã 2xx/3xx/4xx/5xx |
 | **`make_sample_log.py`** | Sinh file `access.log` mẫu giả lập đầy đủ traffic thường lẫn traffic tấn công |
+| **`test_ips.py`** | Kiểm thử tự động (15 test): luật phát hiện, chống chặn nhầm, chặn 403/429, bảo vệ endpoint quản trị, file log |
+| **`static/chart.umd.min.js`** | Thư viện Chart.js lưu sẵn: demo không cần Internet |
 | **`requirements.txt`** | Danh sách thư viện cần thiết (`flask==3.0.3`) |
 
 ---
 
 ## 🚀 Hướng dẫn chạy thử nghiệm
+
+> Chạy kiểm thử tự động: `python -m unittest -v test_ips`
 
 ### CÁCH 1: Demo Realtime (Khuyên dùng khi thuyết trình / báo cáo)
 
@@ -96,7 +108,8 @@ Mở tab trình duyệt mới và gõ thử:
 #### Cách 1.3: Dùng Postman (Test Body POST & Header Scanner)
 * **Gửi SQLi trong Body POST**: Method `POST`, URL `http://127.0.0.1:5000/login`, Body JSON: `{"user": "admin'--"}` ➜ Server quét thấy trong body và chặn **403**.
 * **Giả mạo công cụ quét**: Thêm Header `User-Agent: sqlmap/1.7` ➜ Bị chặn **403**.
-* **Giả lập IP**: Thêm Header `X-Forwarded-For: 123.45.67.89`.
+* **Giả lập IP**: Thêm Header `X-Forwarded-For: 123.45.67.89` (chỉ có tác dụng khi Postman chạy trên cùng máy với server).
+* **SQLi/XSS trong Cookie**: Thêm Header `Cookie: session=<script>alert(1)</script>` ➜ Bị chặn **403**.
 
 #### Cách 1.4: Dùng lệnh cURL trong Terminal
 ```powershell
@@ -119,7 +132,10 @@ python monitor.py access.log
 
 # 3. Xem giao diện web quản lý và phân loại mã log
 python dashboard.py
-# -> Mở trình duyệt: http://127.0.0.1:5000
+# -> Mở trình duyệt: http://127.0.0.1:5001  (cổng riêng, chạy song song được với server.py)
+
+# 4. Phân tích lại log mà server realtime đã ghi
+python monitor.py realtime_access.log
 ```
 
 ---
@@ -149,5 +165,5 @@ python dashboard.py
    * Demo chế độ IPS: Bắn payload ➜ Bị chặn 403 / 429 ➜ Bảng điều khiển ghi nhận đỏ.
    * Demo nút chuyển đổi IDS/IPS: Cho thấy sự khác biệt giữa mã 200 (chỉ giám sát) và mã 403 (chặn thật).
 5. **Đánh giá & Hướng phát triển**:
-   * Kỹ thuật vượt mặt (WAF Evasion): Double encoding, Case manipulation.
+   * Kỹ thuật vượt mặt (WAF Evasion): Double encoding, Case manipulation, chèn xuống dòng (`SELECT%0a*%0aFROM`, đã vá bằng cờ regex `(?s)`), giấu payload trong Cookie/Referer hoặc sau phần đầu của body (đã vá bằng cách quét mọi trường và toàn bộ body). Cách còn lách được: escape Unicode trong JSON (`'`), chèn comment SQL (`UN/**/ION`).
    * Hướng nâng cao: Tự động khóa IP vào tường lửa OS (`iptables` / `netsh`), tích hợp AI Anomaly Detection, cảnh báo qua Telegram Bot.

@@ -26,14 +26,15 @@ DDOS_SO_IP = 50      # và có > 50 IP khác nhau          => nghi DDoS
 
 # Dấu hiệu SQL Injection
 SQLI = [
-    r"(?i)\bunion\b.+\bselect\b",
+    r"(?is)\bunion\b.+\bselect\b",     # (?s): "." khớp cả xuống dòng (chống lách bằng %0a)
     r"(?i)\bor\b\s+\d+\s*=\s*\d+",     # or 1=1
     r"(?i)'\s*or\s*'",                  # ' or '
-    r"(?i)\bselect\b.+\bfrom\b",
+    r"(?is)\bselect\b.+\bfrom\b",
     r"(?i)\bsleep\s*\(",               # time-based
     r"(?i)\bbenchmark\s*\(",
     r"(?i)information_schema",
-    r"(?i)('|\s)--",                    # comment sql (vd: admin'--)
+    r"'\s*(--|#)",                      # đóng chuỗi rồi comment sql (vd: admin'--, admin'#)
+    r";\s*--",                          # kết thúc câu lệnh rồi comment (vd: 1;--)
     r"(?i)@@version",
 ]
 
@@ -59,27 +60,52 @@ DUONG_DAN_NHAY_CAM = [
     "/admin", "/config", "/shell", "/cmd", "/.aws", "/backup",
 ]
 
+# So khớp theo TÊN ĐẦY ĐỦ của 1 đoạn đường dẫn, không so chuỗi con:
+#   /admin, /admin/users, /backup.zip, /.env.bak  -> khớp
+#   /administrator-guide, /configure-help          -> KHÔNG khớp (tránh chặn nhầm)
+DUONG_DAN_RE = re.compile(
+    r"(?i)/(?:" + "|".join(re.escape(d.lstrip("/")) for d in DUONG_DAN_NHAY_CAM) + r")"
+    r"(?=[/?.#\s]|$)"
+)
+
 
 def kiem_tra_request(e):
     """
     Nhận vào 1 dòng log (dictionary), trả về danh sách cảnh báo.
     Mỗi cảnh báo: (loại, mức_độ, chi_tiết)
+
+    SQLi/XSS được quét trên MỌI chỗ kẻ tấn công kiểm soát được: URL, body,
+    Referer, Cookie, User-Agent. Còn luật đường dẫn nhạy cảm chỉ xét URL.
     """
     canh_bao = []
     url = unquote(e.get("url", ""))     # giải mã URL (vd %27 -> ')
     agent = e.get("agent", "")
+    referer = e.get("referer", "")
+    if referer == "-":                  # "-" trong log nghĩa là không có Referer
+        referer = ""
+    # Quét riêng từng trường (không nối chuỗi) để chi tiết cảnh báo chỉ rõ
+    # payload nằm ở đâu, và tránh khớp nhầm giữa 2 trường khác nhau
+    cac_truong = [
+        ("URL", url), ("Body", e.get("body", "")), ("Referer", unquote(referer)),
+        ("Cookie", unquote(e.get("cookie", ""))), ("User-Agent", agent),
+    ]
+
+    def tim(mau):
+        """Trả về chi tiết của trường đầu tiên khớp 1 trong các mẫu, hoặc None."""
+        for ten, gia_tri in cac_truong:
+            if gia_tri and any(re.search(p, gia_tri) for p in mau):
+                return gia_tri[:120] if ten == "URL" else f"[{ten}] {gia_tri[:110]}"
+        return None
 
     # 1) SQL Injection
-    for p in SQLI:
-        if re.search(p, url):
-            canh_bao.append(("SQL Injection", "CAO", url[:120]))
-            break
+    ct = tim(SQLI)
+    if ct:
+        canh_bao.append(("SQL Injection", "CAO", ct))
 
     # 2) XSS
-    for p in XSS:
-        if re.search(p, url):
-            canh_bao.append(("XSS", "CAO", url[:120]))
-            break
+    ct = tim(XSS)
+    if ct:
+        canh_bao.append(("XSS", "CAO", ct))
 
     # 3) Công cụ quét lỗ hổng
     ua = agent.lower()
@@ -89,11 +115,8 @@ def kiem_tra_request(e):
             break
 
     # 4) Dò tìm đường dẫn nhạy cảm
-    low = url.lower()
-    for d in DUONG_DAN_NHAY_CAM:
-        if d in low:
-            canh_bao.append(("Dò tìm đường dẫn nhạy cảm", "TRUNG BÌNH", url[:120]))
-            break
+    if DUONG_DAN_RE.search(url):
+        canh_bao.append(("Dò tìm đường dẫn nhạy cảm", "TRUNG BÌNH", url[:120]))
 
     return canh_bao
 

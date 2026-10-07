@@ -10,6 +10,7 @@ Rồi chạy:  python3 attack_demo.py
 Xem kết quả hiện trực tiếp ở: http://127.0.0.1:5000/__monitor
 """
 
+import sys
 import time
 import random
 import threading
@@ -91,4 +92,5 @@ def main():
 
 
 if __name__ == "__main__":
+    sys.stdout.reconfigure(encoding="utf-8")   # tránh lỗi in tiếng Việt trên terminal Windows
     main()

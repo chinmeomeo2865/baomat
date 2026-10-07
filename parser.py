@@ -56,6 +56,7 @@ def parse_file(path):
 # Chạy thử: python3 parser.py access.log
 if __name__ == "__main__":
     import sys
+    sys.stdout.reconfigure(encoding="utf-8")   # tránh lỗi in tiếng Việt trên terminal Windows
     path = sys.argv[1] if len(sys.argv) > 1 else "access.log"
     data = parse_file(path)
     print(f"Đọc được {len(data)} dòng hợp lệ từ {path}")
