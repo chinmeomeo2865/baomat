@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IPS · Giám sát</title>
+<link rel="stylesheet" href="/static/monitor.css">
+<script src="/static/chart.umd.min.js"></script>  <!-- Chart.js lưu sẵn: demo không cần Internet -->
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="logo">IPS</span>
+    <div>
+      <h1>Hệ thống ngăn chặn tấn công web</h1>
+      <p class="sub">Mọi request đi qua 6 luật trước khi tới ứng dụng</p>
+    </div>
+  </div>
+  <div class="top-right">
+    <span id="khanCap" class="pill pill-off">Khẩn cấp DDoS: TẮT</span>
+    <span id="live" class="live">● Đang nhận dữ liệu</span>
+    <button id="btnReset" class="btn btn-ghost-dark">Xoá dữ liệu demo</button>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <section class="the-tong">
+    <div class="stat"><span class="stat-so" id="sTong">0</span><span class="stat-ten">Tổng request</span></div>
+    <div class="stat"><span class="stat-so so-ok" id="sChoQua">0</span><span class="stat-ten">Cho qua (200)</span></div>
+    <div class="stat"><span class="stat-so so-chan" id="sBiChan">0</span><span class="stat-ten">Bị chặn (403 / 429)</span></div>
+    <div class="stat"><span class="stat-so so-khoa" id="sKhoa">0</span><span class="stat-ten">IP đang bị khoá</span></div>
+  </section>
+
+  <section class="the-loai" id="theLoai" aria-label="Thống kê theo loại tấn công"></section>
+
+  <section class="hang">
+    <div class="box">
+      <div class="box-head">
+        <h2>Lưu lượng 60 giây gần nhất</h2>
+        <span class="muted">mỗi cột = 2 giây</span>
+      </div>
+      <div class="chart-wrap"><canvas id="bieuDo"></canvas></div>
+    </div>
+    <div class="box">
+      <div class="box-head"><h2>Cảnh báo gần nhất</h2></div>
+      <ul id="dsCanhBao" class="ds-canh-bao"></ul>
+    </div>
+  </section>
+
+  <section class="box">
+    <div class="box-head">
+      <h2>IP đang bị khoá</h2>
+      <span class="muted">Đủ 3 điểm vi phạm trong 10 phút thì khoá · tái phạm 5 → 15 → 60 phút</span>
+    </div>
+    <div class="tbl-scroll tbl-thap">
+      <table class="bang">
+        <thead><tr><th>IP</th><th>Lý do</th><th>Lần khoá</th><th>Còn lại</th><th></th></tr></thead>
+        <tbody id="tbKhoa"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="box">
+    <div class="box-head">
+      <h2>Request nhận vào</h2>
+      <span class="muted" id="demKq"></span>
+    </div>
+    <div class="loc">
+      <select id="fLoai" aria-label="Lọc theo loại tấn công">
+        <option value="all">Mọi loại</option>
+        <option value="binh_thuong">Bình thường</option>
+        <option value="ip_bi_khoa">IP bị khoá</option>
+      </select>
+      <select id="fKetQua" aria-label="Lọc theo kết quả">
+        <option value="all">Mọi kết quả</option>
+        <option value="cho_qua">200 Cho qua</option>
+        <option value="chan_403">403 Chặn nội dung</option>
+        <option value="chan_429">429 Quá tần suất</option>
+        <option value="ip_bi_khoa">403 IP bị khoá</option>
+      </select>
+      <input id="fTim" type="search" placeholder="Tìm theo IP, URL, User-Agent..." aria-label="Tìm kiếm">
+      <label class="chk"><input type="checkbox" id="fTanCong"> Chỉ hiện tấn công</label>
+      <button id="btnBoLoc" class="btn btn-ghost">Bỏ lọc</button>
+    </div>
+    <div class="tbl-scroll">
+      <table class="bang bang-req">
+        <thead><tr><th>Thời gian</th><th>IP</th><th>Method</th><th>URL</th><th>Kết quả</th><th>Phân loại</th><th>Chế tài</th></tr></thead>
+        <tbody id="tbReq"></tbody>
+      </table>
+    </div>
+  </section>
+
+</main>
+
+<div class="overlay" id="overlay">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="ctietTieuDe">
+    <button class="close" id="btnDong" aria-label="Đóng">×</button>
+    <h3 id="ctietTieuDe">Chi tiết request</h3>
+    <dl class="kv" id="ctiet"></dl>
+  </div>
+</div>
+
+<script src="/static/monitor.js"></script>
+</body>
+</html>
