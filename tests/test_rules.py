@@ -88,11 +88,13 @@ class TestCongCuQuet(unittest.TestCase):
 class TestDuongDanNhayCam(unittest.TestCase):
 
     def test_bat(self):
-        for u in ["/admin", "/admin/users", "/.env", "/.env.bak", "/.git/config", "/wp-admin/", "/backup.zip"]:
+        for u in ["/admin", "/admin/users", "/admin?x=1", "/.env", "/.env.bak", "/.git/config",
+                  "/wp-admin/", "/backup.zip", "/shop/.env", "/%2Eenv"]:
             self.assertIsNotNone(sensitive_path.kiem_tra(req(u), []), u)
 
     def test_khong_chan_nham(self):
-        for u in ["/products", "/administrator-guide", "/configure-help"]:
+        for u in ["/products", "/administrator-guide", "/configure-help", "/my-admin",
+                  "/login?next=/admin", "/search?q=how to edit .env file"]:
             self.assertIsNone(sensitive_path.kiem_tra(req(u), []), u)
         # /admin nằm trong Referer thì không tính là dò đường dẫn
         self.assertIsNone(sensitive_path.kiem_tra(req("/products", referer="http://site/admin"), []))

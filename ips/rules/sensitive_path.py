@@ -31,4 +31,7 @@ MAU = re.compile(
 def kiem_tra(req, lich_su):
     # Chỉ xét URL: quản trị viên đi từ trang /admin sang trang khác (Referer) là bình thường
     url = req.get("url", "")
-    return url[:120] if MAU.search(url) else None
+    # Chỉ xét phần đường dẫn trước "?": file được truy cập qua đường dẫn, còn query string
+    # như /login?next=/admin là tham số chuyển hướng bình thường, không phải dò file
+    duong_dan = url.split("?", 1)[0]
+    return url[:120] if MAU.search(duong_dan) else None
